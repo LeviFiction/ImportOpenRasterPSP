@@ -31,11 +31,16 @@ def ScriptProperties():
 
 def Do(Environment):
     '''Main function of the script'''
+
+    # Grab Filename
     root = Tk()
     root.withdraw()
     filenames = tkFileDialog.askopenfilenames(initialdir = "%userprofile%\\Pictures", title = "Select OpenRaster file",filetypes = (("OpenRaster files","*.ora"),))
     root.destroy()
-    print(filenames)
+
+    if filenames == ('',):
+        return
+
     for filename in filenames:
         with ZipFile(filename, 'r') as zip:
             if not "mimetype" in zip.namelist():
@@ -45,13 +50,15 @@ def Do(Environment):
             if not "stack.xml" in zip.namelist():
                 return
 
-            layer_doc = zip.read("stack.xml")
-            image = minidom.parseString(layer_doc).getElementsByTagName("image")[0]
+            # Unzip and parse the image definition file "stack.xml"
+            stack_xml = zip.read("stack.xml")
+            image = minidom.parseString(stack_xml).getElementsByTagName("image")[0]
             stack = image.getElementsByTagName("stack")[0]
             width = int(image.attributes['w'].value)
             height = int(image.attributes['h'].value)
 
-            #default to xres if xres and yres are different or default to whichever is present
+            # PSP resolution is the same both horizontal and vertial
+            # Default to xres, if not present switch to yres, if not present default to 72ppi
             if 'xres' in image.attributes.keys():
                 res = float(image.attributes['xrex'].value)
             elif 'yres' in image.attributes.keys():
@@ -59,13 +66,24 @@ def Do(Environment):
             else:
                 res = 72.0
 
+            # We're creating a new image and I don't trust using SelectDocument
+            # And App.ActiveDocument.  So grab the last loaded doc and send that
+            # to all commands to ensure we're working on the current doc at all times
             new_file(Environment, width, height, res)
             target_doc = App.Documents[-1] #use last doc
+
+            # Temporary directory built into Windows for the user
             temp_dir = path.expandvars(r'%LOCALAPPDATA%\temp')
+
             # Go through stack and extract and import files
-            for child in reversed(list(stack.childNodes)):
+            for child in reversed(stack.childNodes):
+                # OpenRaster format supports layers, stacks, and technically text
+                # though text is not currently defined
                 if child.tagName == "layer":
                     src = child.attributes['src'].value
+                    # we don't support the svg option
+                    if path.splitext(src)[1] != '.png':
+                        continue
                     zip.extract(src, temp_dir)
                     temp_filename = path.join(temp_dir, src)
                     attribute_keys = ['name:string', 'x:int', 'y:int', 'opacity:float', 'visibility:string', 'composite_op:string']
@@ -77,8 +95,15 @@ def Do(Environment):
                             attributes[attrib] = value
                     open_png_as_layer(Environment, temp_filename, doc=target_doc, **attributes)
                     remove(temp_filename) #delete tempoarary file
+                elif child.tagName == "stack":
+                    # This will eventually be a recursive call
+                    # passing the stack to this function initially
+                    # Then passing it to itself when it encounters
+                    # a group.
+                    stack_group(Environment, child, group=True)
 
 def new_file(Env, width, height, res=72):
+    '''Creates a new file the size of the image we're importing'''
     if type(res) not in [int, float]:
         res = float(res)
     # File New
@@ -97,6 +122,7 @@ def new_file(Env, width, height, res=72):
             })
 
 def open_png_as_layer(Env, filename, name=u'RasterLayer', x=0, y=0, composite_op="svg:src-over", visibility=True, opacity=1, doc=App.TargetDocument):
+    '''Opens the layer as described by the stack xml - meant for the PNG items as SVG and text are not directly supported'''
     blendModes = {'svg:src-over': App.Constants.BlendMode.Normal,
                   'svg:multiply': App.Constants.BlendMode.Multiply,
                   'svg:screen': App.Constants.BlendMode.Screen,
@@ -128,33 +154,16 @@ def open_png_as_layer(Env, filename, name=u'RasterLayer', x=0, y=0, composite_op
             'GeneralSettings': gss
             }, doc)
     rect = App.Do(Env, 'ReturnLayerProperties', {})['LayerRect']
-    #move_layer(Env, x,y,rect[1],rect[2], doc)
-    move_layer2(Env, x, y, rect[0][0], rect[0][1], doc)
+    move_layer(Env, x, y, rect[0][0], rect[0][1], doc)
+    # For unknown reasons PSP doesn't like to set multiple properties at once
+    # So I have to set each one individually
     set_layer_properties(Env, name=name, doc=doc)
     set_layer_properties(Env, opacity=opacity, doc=doc)
     set_layer_properties(Env, visibility=visibility, doc=doc)
     set_layer_properties(Env, blendMode=blendMode, doc=doc)
-    
-def move_layer(Env, x, y, width, height, doc):
-    if width == 0 or height == 0:
-        return
-    App.Do( Env, 'Pick', {
-            'Type': App.Constants.ObjectSelection.Select, 
-            'X': 0, 
-            'Y': 0, 
-            'Width': 1, 
-            'Height': 1, 
-            'Group': True, 
-            'Handle1': (x,y+height), #bottom-left
-            'Handle2': (x,y), #top-left
-            'Handle3': (x+width,y), #top-right
-            'Handle4': (x+width,y+height), #bottom-right
-            'Pivot': ((x+width)/2.0,(y+height)/2.0), 
-            'EarlyX4Script': False, 
-            'GeneralSettings': gss
-            },doc)
 
-def move_layer2(Env, x, y, oldx, oldy, doc):
+def move_layer(Env, x, y, oldx, oldy, doc):
+    '''Uses PSP's Move tool to move the layer into place quickly'''
     if oldx == x and oldy == y:
         return
     # Move
@@ -164,14 +173,15 @@ def move_layer2(Env, x, y, oldx, oldy, doc):
             'SelectPoint': None,
             'GeneralSettings':gss},doc)
 
-def set_layer_properties(Env, name=None, opacity=None, visibility=None,blendMode=None,doc=App.TargetDocument):
+def set_layer_properties(Env, name=None, opacity=None, visibility=None,blendMode=None,alphalock=None,doc=App.TargetDocument):
+    '''Calls PSP API command to set layer properties'''
     # MultiObjectProperties
     App.Do( Env, 'MultiObjectProperties', {
             'General': {
                 'Opacity': opacity, 
                 'Name': name, 
                 'IsVisible': visibility, 
-                'IsTransparencyLocked': None, 
+                'IsTransparencyLocked': alphalock, 
                 'LinkSet': None, 
                 'UseHighlight': None, 
                 'PaletteHighlightColor': None, 
@@ -185,6 +195,7 @@ def set_layer_properties(Env, name=None, opacity=None, visibility=None,blendMode
             },doc)
 
 def get_attribute(element, field):
+    '''converts attributes to given types and returns them or None if they don't exist'''
     types ={"int": int, "float": float, "string":str}
     if "_" in field:
         field = field.replace("_", "-")
@@ -192,3 +203,8 @@ def get_attribute(element, field):
     if field in element.attributes.keys():
         return types[t](element.attributes[field].value)
     return None
+
+def stack_group(Env, element, group=False):
+    '''Pass in Stack node to create groups'''
+    # process list of layers, if group, import layer first then create group from list.
+    pass
