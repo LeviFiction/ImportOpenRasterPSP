@@ -1,0 +1,194 @@
+from PSPApp import *
+from zipfile import ZipFile
+from xml.dom import minidom
+from os import path, remove
+from Tkinter import Tk
+import tkFileDialog
+
+#------------------------------------------------------------------
+# Global Variables
+#------------------------------------------------------------------
+gs = {'ExecutionMode': App.Constants.ExecutionMode.Default, 
+      'AutoActionMode': App.Constants.AutoActionMode.Match, 
+      'Version': ((9,0,0),1)}
+gss = gs.copy()
+gsi = gs.copy()
+gss['ExecutionMode'] = App.Constants.ExecutionMode.Silent
+gsi['ExecutionMode'] = App.Constants.ExecutionMode.Interactive
+
+#------------------------------------------------------------------
+# Script Start
+#------------------------------------------------------------------
+def ScriptProperties():
+    '''Return Script Properties'''
+    return {
+        'Author': 'LeviFiction',
+        'Copyright': '2022 Creative Commons 3.0',
+        'Description': 'Reads as much of the baseline openraster format as possible',
+        'Host': 'Paint Shop Pro',
+        'Host Version': '9'
+        }
+
+def Do(Environment):
+    '''Main function of the script'''
+    root = Tk()
+    root.withdraw()
+    filenames = tkFileDialog.askopenfilenames(initialdir = "%userprofile%\\Pictures", title = "Select OpenRaster file",filetypes = (("OpenRaster files","*.ora"),))
+    root.destroy()
+    print(filenames)
+    for filename in filenames:
+        with ZipFile(filename, 'r') as zip:
+            if not "mimetype" in zip.namelist():
+                return
+            if zip.read("mimetype") != "image/openraster":
+                return
+            if not "stack.xml" in zip.namelist():
+                return
+
+            layer_doc = zip.read("stack.xml")
+            image = minidom.parseString(layer_doc).getElementsByTagName("image")[0]
+            stack = image.getElementsByTagName("stack")[0]
+            width = int(image.attributes['w'].value)
+            height = int(image.attributes['h'].value)
+
+            #default to xres if xres and yres are different or default to whichever is present
+            if 'xres' in image.attributes.keys():
+                res = float(image.attributes['xrex'].value)
+            elif 'yres' in image.attributes.keys():
+                res = float(image.attributes['yrex'].value)
+            else:
+                res = 72.0
+
+            new_file(Environment, width, height, res)
+            target_doc = App.Documents[-1] #use last doc
+            temp_dir = path.expandvars(r'%LOCALAPPDATA%\temp')
+            # Go through stack and extract and import files
+            for child in reversed(list(stack.childNodes)):
+                if child.tagName == "layer":
+                    src = child.attributes['src'].value
+                    zip.extract(src, temp_dir)
+                    temp_filename = path.join(temp_dir, src)
+                    attribute_keys = ['name:string', 'x:int', 'y:int', 'opacity:float', 'visibility:string', 'composite_op:string']
+                    attributes = {}
+                    for attrib in attribute_keys:
+                        value = get_attribute(child, attrib)
+                        if value != None:
+                            attrib, t = attrib.split(":")
+                            attributes[attrib] = value
+                    open_png_as_layer(Environment, temp_filename, doc=target_doc, **attributes)
+                    remove(temp_filename) #delete tempoarary file
+
+def new_file(Env, width, height, res=72):
+    if type(res) not in [int, float]:
+        res = float(res)
+    # File New
+    App.Do( Env, 'NewFile', {
+            'Width': width, 
+            'Height': height, 
+            'ColorDepth': App.Constants.Colordepth.SixteenMillionColor, 
+            'DimensionUnits': App.Constants.DimensionType.Pixels, 
+            'ResolutionUnits': App.Constants.ResolutionUnits.PixelsPerIn, 
+            'Resolution': res, 
+            'FillMaterial': {'Color': (255,255,255)}, 
+            'Transparent': False, 
+            'LayerType': App.Constants.NewLayerType.Raster, 
+            'ArtMediaTexture': {}, 
+            'GeneralSettings': gss
+            })
+
+def open_png_as_layer(Env, filename, name=u'RasterLayer', x=0, y=0, composite_op="svg:src-over", visibility=True, opacity=1, doc=App.TargetDocument):
+    blendModes = {'svg:src-over': App.Constants.BlendMode.Normal,
+                  'svg:multiply': App.Constants.BlendMode.Multiply,
+                  'svg:screen': App.Constants.BlendMode.Screen,
+                  'svg:overlay': App.Constants.BlendMode.Overlay,
+                  'svg:darken': App.Constants.BlendMode.Darken,
+                  'svg:lighten': App.Constants.BlendMode.Lighten,
+                  'svg:color-dodge': App.Constants.BlendMode.Dodge,
+                  'svg:color-burn': App.Constants.BlendMode.Burn,
+                  'svg:hard-light': App.Constants.BlendMode.HardLight,
+                  'svg:soft-light': App.Constants.BlendMode.SoftLight,
+                  'svg:difference': App.Constants.BlendMode.Difference,
+                  'svg:color': App.Constants.BlendMode.TrueColor,
+                  'svg:luminosity': App.Constants.BlendMode.TrueLuminance,
+                  'svg:hue': App.Constants.BlendMode.TrueHue,
+                  'svg:saturation': App.Constants.BlendMode.TrueSaturation,
+                  'svg:plus': App.Constants.BlendMode.Normal,
+                  'svg:dst-in': App.Constants.BlendMode.Normal,
+                  'svg:dst-out': App.Constants.BlendMode.Normal,
+                  'svg:src-atop': App.Constants.BlendMode.Normal,
+                  'svg:dst-atop': App.Constants.BlendMode.Normal}
+    visibility = True if visibility == "visible" else False
+    opacity = opacity * 100
+    blendMode = blendModes[composite_op]
+    # FileOpenAsNewLayer
+    App.Do( Env, 'FileOpenAsNewLayer', {
+            'FileList': [filename], 
+            'InsertTo': -1, 
+            'Path': None, 
+            'GeneralSettings': gss
+            }, doc)
+    rect = App.Do(Env, 'ReturnLayerProperties', {})['LayerRect']
+    #move_layer(Env, x,y,rect[1],rect[2], doc)
+    move_layer2(Env, x, y, rect[0][0], rect[0][1], doc)
+    set_layer_properties(Env, name=name, doc=doc)
+    set_layer_properties(Env, opacity=opacity, doc=doc)
+    set_layer_properties(Env, visibility=visibility, doc=doc)
+    set_layer_properties(Env, blendMode=blendMode, doc=doc)
+    
+def move_layer(Env, x, y, width, height, doc):
+    if width == 0 or height == 0:
+        return
+    App.Do( Env, 'Pick', {
+            'Type': App.Constants.ObjectSelection.Select, 
+            'X': 0, 
+            'Y': 0, 
+            'Width': 1, 
+            'Height': 1, 
+            'Group': True, 
+            'Handle1': (x,y+height), #bottom-left
+            'Handle2': (x,y), #top-left
+            'Handle3': (x+width,y), #top-right
+            'Handle4': (x+width,y+height), #bottom-right
+            'Pivot': ((x+width)/2.0,(y+height)/2.0), 
+            'EarlyX4Script': False, 
+            'GeneralSettings': gss
+            },doc)
+
+def move_layer2(Env, x, y, oldx, oldy, doc):
+    if oldx == x and oldy == y:
+        return
+    # Move
+    App.Do( Env, 'Mover', {
+            'Offset': (x-oldx,y-oldy), 
+            'Object': App.Constants.LayerOrSelection.Layer, 
+            'SelectPoint': None,
+            'GeneralSettings':gss},doc)
+
+def set_layer_properties(Env, name=None, opacity=None, visibility=None,blendMode=None,doc=App.TargetDocument):
+    # MultiObjectProperties
+    App.Do( Env, 'MultiObjectProperties', {
+            'General': {
+                'Opacity': opacity, 
+                'Name': name, 
+                'IsVisible': visibility, 
+                'IsTransparencyLocked': None, 
+                'LinkSet': None, 
+                'UseHighlight': None, 
+                'PaletteHighlightColor': None, 
+                'GroupLink': None, 
+                'BlendMode': blendMode
+                }, 
+            'Effects': None, 
+            'WorkingMode': 1, 
+            'Path': None, 
+            'GeneralSettings': gss
+            },doc)
+
+def get_attribute(element, field):
+    types ={"int": int, "float": float, "string":str}
+    if "_" in field:
+        field = field.replace("_", "-")
+    field,t = field.split(":")
+    if field in element.attributes.keys():
+        return types[t](element.attributes[field].value)
+    return None
