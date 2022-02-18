@@ -137,18 +137,18 @@ def open_png_as_layer(Env, filename, name=u'RasterLayer', x=0, y=0, composite_op
     blendMode = blendModes[composite_op]
     alphalock = False if edit_locked == "false" else True
     selected = False if selected == "false" else True
-    # openAsNewLayer(Env, filename, doc)
-    # FileOpenAsNewLayer
-    App.Do( Env, 'FileOpenAsNewLayer', {
-            'FileList': [filename], 
-            'InsertTo': -1, 
-            'Path': None, 
-            'GeneralSettings': gss
-            }, doc)
-    #png = PNG(filename)
-    #if png.width != doc.Width and png.height != doc.height:
-    rect = getLayerRect(Env, doc)
-    move_layer(Env, x, y, rect[0][0], rect[0][1], doc)
+    openAsNewLayer(Env, filename, doc)
+    # # FileOpenAsNewLayer
+    # App.Do( Env, 'FileOpenAsNewLayer', {
+    #         'FileList': [filename], 
+    #         'InsertTo': -1, 
+    #         'Path': None, 
+    #         'GeneralSettings': gss
+    #         }, doc)
+    # png = PNG(filename)
+    # if png.width != doc.Width and png.height != doc.height:
+    #     rect = getLayerRect(Env, doc)
+    #     move_layer(Env, x, y, rect[0][0], rect[0][1], doc)
     # For unknown reasons PSP doesn't like to set multiple properties at once
     # So I have to set each one individually
     set_layer_properties(Env, name=name, doc=doc)
@@ -236,7 +236,7 @@ def create_group(Env, name=u'Group', composite_op="svg:src-over", visibility="vi
                 'LinkSet': 0, 
                 'UseHighlight': False, 
                 'PaletteHighlightColor': (255,255,64), 
-                'GroupLink': True, 
+                'GroupLink': False, 
                 'BlendMode': blendModes[composite_op]
                 }, 
             'BlendRanges': {
