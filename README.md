@@ -11,6 +11,12 @@ It should also be noted that layers are stored in viewing order, so while PSP st
 
 Also, because we're using a series of pre-built steps in PSP this is much slower than it would be normally, especially with large images.
 
+## Current Issues
+1 - When using "Open As Layer" in PSP it will open the PNG but upon seeing that it's mostly empty will just center the resulting image.  So if a program like GIMP saves out a PNG that is the full size of the image we're working on it'll give a position of 0,0 and either my script will move the visible area to the corner or it'll be centered in canvas with no way of determining where it's supposed to be.
+
+2 - When using "Open As Layer" it always creates the layer at the top of the layer's palette.  If I'm using groups I need a good way to determine how to put it into the appropriate group afterward.
+
+
 ## Library Requirements
 * zipfile
 * xml.dom 

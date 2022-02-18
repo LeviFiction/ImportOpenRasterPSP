@@ -1,9 +1,11 @@
+from turtle import st
 from PSPApp import *
 from zipfile import ZipFile
 from xml.dom import minidom
 from os import path, remove
 from Tkinter import Tk
 import tkFileDialog
+import struct
 
 #------------------------------------------------------------------
 # Global Variables
@@ -15,7 +17,14 @@ gss = gs.copy()
 gsi = gs.copy()
 gss['ExecutionMode'] = App.Constants.ExecutionMode.Silent
 gsi['ExecutionMode'] = App.Constants.ExecutionMode.Interactive
-
+temp_dir = path.expandvars(r'%LOCALAPPDATA%\temp')
+blendModes = {'svg:src-over': 0, 'svg:multiply': 7, 'svg:screen': 8, 'svg:overlay': 10,
+                'svg:darken': 1, 'svg:lighten': 2, 'svg:color-dodge': 14, 'svg:color-burn': 15,
+                'svg:hard-light': 11, 'svg:soft-light': 12, 'svg:difference': 13, 'svg:color': 19,
+                'svg:luminosity': 20, 'svg:hue': 17, 'svg:saturation': 18, 'svg:plus': 0, 
+                'svg:dst-in':0, 'svg:dst-out': 0, 'svg:src-atop': 0, 'svg:dst-atop': 0}
+selectedLayer = None
+zip_file = None
 #------------------------------------------------------------------
 # Script Start
 #------------------------------------------------------------------
@@ -37,7 +46,7 @@ def Do(Environment):
     root.withdraw()
     filenames = tkFileDialog.askopenfilenames(initialdir = "%userprofile%\\Pictures", title = "Select OpenRaster file",filetypes = (("OpenRaster files","*.ora"),))
     root.destroy()
-
+    global zip_file
     if filenames == ('',):
         return
 
@@ -49,7 +58,7 @@ def Do(Environment):
                 return
             if not "stack.xml" in zip.namelist():
                 return
-
+            zip_file = zip
             # Unzip and parse the image definition file "stack.xml"
             stack_xml = zip.read("stack.xml")
             image = minidom.parseString(stack_xml).getElementsByTagName("image")[0]
@@ -73,34 +82,33 @@ def Do(Environment):
             target_doc = App.Documents[-1] #use last doc
 
             # Temporary directory built into Windows for the user
-            temp_dir = path.expandvars(r'%LOCALAPPDATA%\temp')
-
-            # Go through stack and extract and import files
-            for child in reversed(stack.childNodes):
-                # OpenRaster format supports layers, stacks, and technically text
-                # though text is not currently defined
-                if child.tagName == "layer":
-                    src = child.attributes['src'].value
-                    # we don't support the svg option
-                    if path.splitext(src)[1] != '.png':
-                        continue
-                    zip.extract(src, temp_dir)
-                    temp_filename = path.join(temp_dir, src)
-                    attribute_keys = ['name:string', 'x:int', 'y:int', 'opacity:float', 'visibility:string', 'composite_op:string']
-                    attributes = {}
-                    for attrib in attribute_keys:
-                        value = get_attribute(child, attrib)
-                        if value != None:
-                            attrib, t = attrib.split(":")
-                            attributes[attrib] = value
-                    open_png_as_layer(Environment, temp_filename, doc=target_doc, **attributes)
-                    remove(temp_filename) #delete tempoarary file
-                elif child.tagName == "stack":
-                    # This will eventually be a recursive call
-                    # passing the stack to this function initially
-                    # Then passing it to itself when it encounters
-                    # a group.
-                    stack_group(Environment, child, group=True)
+            stack_group(Environment, stack, target_doc)
+            # # Go through stack and extract and import files
+            # for child in reversed(stack.childNodes):
+            #     # OpenRaster format supports layers, stacks, and technically text
+            #     # though text is not currently defined
+            #     if child.tagName == "layer":
+            #         src = child.attributes['src'].value
+            #         # we don't support the svg option
+            #         if path.splitext(src)[1] != '.png':
+            #             continue
+            #         zip.extract(src, temp_dir)
+            #         temp_filename = path.join(temp_dir, src)
+            #         attribute_keys = ['name:string', 'x:int', 'y:int', 'opacity:float', 'visibility:string', 'composite_op:string']
+            #         attributes = {}
+            #         for attrib in attribute_keys:
+            #             value = get_attribute(child, attrib)
+            #             if value != None:
+            #                 attrib, t = attrib.split(":")
+            #                 attributes[attrib] = value
+            #         open_png_as_layer(Environment, temp_filename, doc=target_doc, **attributes)
+            #         remove(temp_filename) #delete tempoarary file
+            #     elif child.tagName == "stack":
+            #         # This will eventually be a recursive call
+            #         # passing the stack to this function initially
+            #         # Then passing it to itself when it encounters
+            #         # a group.
+            #         stack_group(Environment, child, group=True)
 
 def new_file(Env, width, height, res=72):
     '''Creates a new file the size of the image we're importing'''
@@ -121,31 +129,15 @@ def new_file(Env, width, height, res=72):
             'GeneralSettings': gss
             })
 
-def open_png_as_layer(Env, filename, name=u'RasterLayer', x=0, y=0, composite_op="svg:src-over", visibility=True, opacity=1, doc=App.TargetDocument):
+def open_png_as_layer(Env, filename, name=u'RasterLayer', x=0, y=0, composite_op="svg:src-over", visibility="visible", opacity=1, selected="false", edit_locked="false", doc=App.TargetDocument):
     '''Opens the layer as described by the stack xml - meant for the PNG items as SVG and text are not directly supported'''
-    blendModes = {'svg:src-over': App.Constants.BlendMode.Normal,
-                  'svg:multiply': App.Constants.BlendMode.Multiply,
-                  'svg:screen': App.Constants.BlendMode.Screen,
-                  'svg:overlay': App.Constants.BlendMode.Overlay,
-                  'svg:darken': App.Constants.BlendMode.Darken,
-                  'svg:lighten': App.Constants.BlendMode.Lighten,
-                  'svg:color-dodge': App.Constants.BlendMode.Dodge,
-                  'svg:color-burn': App.Constants.BlendMode.Burn,
-                  'svg:hard-light': App.Constants.BlendMode.HardLight,
-                  'svg:soft-light': App.Constants.BlendMode.SoftLight,
-                  'svg:difference': App.Constants.BlendMode.Difference,
-                  'svg:color': App.Constants.BlendMode.TrueColor,
-                  'svg:luminosity': App.Constants.BlendMode.TrueLuminance,
-                  'svg:hue': App.Constants.BlendMode.TrueHue,
-                  'svg:saturation': App.Constants.BlendMode.TrueSaturation,
-                  'svg:plus': App.Constants.BlendMode.Normal,
-                  'svg:dst-in': App.Constants.BlendMode.Normal,
-                  'svg:dst-out': App.Constants.BlendMode.Normal,
-                  'svg:src-atop': App.Constants.BlendMode.Normal,
-                  'svg:dst-atop': App.Constants.BlendMode.Normal}
+    global selectedLayer
     visibility = True if visibility == "visible" else False
     opacity = opacity * 100
     blendMode = blendModes[composite_op]
+    alphalock = False if edit_locked == "false" else True
+    selected = False if selected == "false" else True
+    # openAsNewLayer(Env, filename, doc)
     # FileOpenAsNewLayer
     App.Do( Env, 'FileOpenAsNewLayer', {
             'FileList': [filename], 
@@ -153,7 +145,9 @@ def open_png_as_layer(Env, filename, name=u'RasterLayer', x=0, y=0, composite_op
             'Path': None, 
             'GeneralSettings': gss
             }, doc)
-    rect = App.Do(Env, 'ReturnLayerProperties', {})['LayerRect']
+    #png = PNG(filename)
+    #if png.width != doc.Width and png.height != doc.height:
+    rect = getLayerRect(Env, doc)
     move_layer(Env, x, y, rect[0][0], rect[0][1], doc)
     # For unknown reasons PSP doesn't like to set multiple properties at once
     # So I have to set each one individually
@@ -161,6 +155,9 @@ def open_png_as_layer(Env, filename, name=u'RasterLayer', x=0, y=0, composite_op
     set_layer_properties(Env, opacity=opacity, doc=doc)
     set_layer_properties(Env, visibility=visibility, doc=doc)
     set_layer_properties(Env, blendMode=blendMode, doc=doc)
+    set_layer_properties(Env, alphalock=alphalock, doc=doc)
+    if selected:
+        selectedLayer = getLayerPath(Env, doc)
 
 def move_layer(Env, x, y, oldx, oldy, doc):
     '''Uses PSP's Move tool to move the layer into place quickly'''
@@ -204,7 +201,184 @@ def get_attribute(element, field):
         return types[t](element.attributes[field].value)
     return None
 
-def stack_group(Env, element, group=False):
+def get_all_attributes(element, attribute_list):
+    attributes = {}
+    for attrib in attribute_list:
+        value = get_attribute(element, attrib)
+        if value != None:
+            attrib, t = attrib.split(":")
+            attributes[attrib] = value
+    return attributes
+
+def selectLayer(env, path=None, shortcut=None):
+    shortcuts = {'top':(9999,9999,[],False), 'bottom':(9999,-9999,[], False), 
+                 'parent':(1,0,[],False), 'first_child':(0,0,[1],False), 
+                 'last_child':(0,0, [9999], False), 'top_of_group':(0,9999,[],False),
+                 'bottom_of_group':(0,-9999,[],False)}
+    if shortcut and shortcut in shortcuts:
+        path = shortcuts[shortcut]
+    if not path:
+        return
+    App.Do(env, 'SelectLayer', {'Path':path})
+
+def create_group(Env, name=u'Group', composite_op="svg:src-over", visibility="visible", opacity=1, edit_locked='false', selected="false", doc=App.ActiveDocument):
+    global selectedLayer
+    visibility = True if visibility == "visible" else False
+    selected = False if selected == "false" else True
+    opacity = opacity * 100
+    # New Layer Group
+    App.Do( Env, 'NewLayerGroup', {
+            'General': {
+                'Opacity': opacity, 
+                'Name': name, 
+                'IsVisible': visibility, 
+                'IsTransparencyLocked': edit_locked, 
+                'LinkSet': 0, 
+                'UseHighlight': False, 
+                'PaletteHighlightColor': (255,255,64), 
+                'GroupLink': True, 
+                'BlendMode': blendModes[composite_op]
+                }, 
+            'BlendRanges': {
+                'BlendRangeGreen': (0,0,255,255,0,0,255,255), 
+                'BlendRangeRed': (0,0,255,255,0,0,255,255), 
+                'BlendRangeBlue': (0,0,255,255,0,0,255,255), 
+                'BlendRangeGrey': (0,0,255,255,0,0,255,255)
+                }, 
+            'GeneralSettings': gss
+            })
+    if selected:
+        selectedLayer = getLayerPath(Env, doc)
+    selectLayer(Env, shortcut='first_child')
+
+def stack_group(Env, stack, doc, group=False):
     '''Pass in Stack node to create groups'''
+    #all attributes available on layers and inner-stacks/groups
+    attribute_keys = ['name:string', 'x:int', 'y:int', 'opacity:float', 'visibility:string', 'composite_op:string', 'edit_locked:string', 'selected:string']
     # process list of layers, if group, import layer first then create group from list.
+    # Go through stack and extract and import files
+    count = 0
+    for child in reversed(stack.childNodes):
+        # OpenRaster format supports layers, stacks, and technically text
+        # though text is not currently defined
+        if child.tagName == "layer":
+            src = child.attributes['src'].value
+            # we don't support the svg option
+            if path.splitext(src)[1] != '.png':
+                continue
+            zip_file.extract(src, temp_dir)
+            temp_filename = path.join(temp_dir, src)
+            attributes = get_all_attributes(child,attribute_keys)
+            open_png_as_layer(Env, temp_filename, doc=doc, **attributes)
+            remove(temp_filename) #delete tempoarary file
+            if group and count == 0:
+                #if this is the first layer in a new group, create a new group layer and select the child
+                stack_attrs = get_all_attributes(stack, attribute_keys)
+                create_group(Env, **stack_attrs)
+        elif child.tagName == "stack":
+            # This will eventually be a recursive call
+            # passing the stack to this function initially
+            # Then passing it to itself when it encounters
+            # a group.
+            if len(child.childNodes) > 0:
+                stack_group(Env, child, doc, group=True)
+        count += 1
+    if group:
+        selectLayer(Env, shortcut="parent") #select group layer after 
+    elif selectedLayer:
+        selectLayer(Env, path=selectedLayer)
+
+def getLayerPath(env, doc=None):
+    return App.Do(env, 'ReturnLayerProperties', {}, doc)['Path']
+
+def getLayerRect(env, doc=None):
+    print(App.Do(env, 'ReturnLayerProperties', {},doc))
+    return App.Do(env, 'ReturnLayerProperties', {},doc)['LayerRect']
+
+def PasteAsNewLayer(env, doc=None):
+    # PasteAsNewLayer
+    App.Do( env, 'PasteAsNewLayer', {'CreateFromDropData': False, 'InsertPos': -1,'GeneralSettings':gss }, doc)
+
+def closeDocument(env, doc):
+    App.Do( env, 'FileClose', {'GeneralSettings':gss}, doc)
+
+def openAsNewLayer(env, filename, doc=None):
+    openFile(env, filename)
+    currentdoc = App.Documents[-1]
+    rect = getLayerRect(env, currentdoc)
+    copyLayer(env,currentdoc)
+    closeDocument(env, currentdoc)
+    PasteAsNewLayer(env, doc)
+    current_rect = getLayerRect(env, doc)
+    move_layer(env, rect[0][0], rect[0][1], current_rect[0][0], current_rect[0][1], doc)
     pass
+
+def copyLayer(env, doc):
+    App.Do( env, 'Copy', {'GeneralSettings': gss}, doc)
+
+
+def openFile(env, filename):
+    App.Do( env, 'FileOpen', {
+            'FileList': [filename], 
+            'Folder': u'C:\\Users\\matthewjohnson\\Pictures', 
+            'FileFormat': App.Constants.FileFormat.Unknown, 
+            'FileOpenScript': u'', 
+            'EnablePreprocessing': False, 
+            'GeneralSettings': gss
+            })
+
+class PNG:
+    def __init__(self, file):
+        self.isPNG = 0
+        self.palette = []
+        self.apalette = []
+        self.width=0
+        self.height=0
+        self.depth=0
+        self.ctype=0
+        self.compression=0
+        self.filter=0
+        self.interlace = 0
+        with open(file, 'rb') as image:
+            buffer = image.read()
+        offset = 0
+        header = struct.unpack("B3s2sBB",buffer[offset:offset + 8])
+        if not (header[0] == 137 and header[1] == b'PNG'):
+            return
+        self.isPNG = 1
+        offset += 8
+        while offset < len(buffer):
+            length,type = struct.unpack(">i4s", buffer[offset:offset + 8])
+            offset += 8
+            data = buffer[offset:offset + length]
+            offset += length
+            crc = struct.unpack(">i", buffer[offset: offset + 4])
+            offset += 4
+            if type == b'IHDR':
+                self.IHDR(data)
+                break
+            elif type == b'PLTE':
+                self.PLTE(data)
+            elif type == b'tRNS':
+                self.tRNS(data)
+
+        
+    def IHDR(self, data):
+        self.width,self.height,self.depth,self.ctype,self.compression,self.filter,self.interlace = struct.unpack(">iiBBBBB", data)
+    
+    def PLTE(self, data):
+        if len(data) % 3 != 0:
+            return
+        num = len(data)
+        nums = struct.unpack(str(num)+"B", data)
+        for c in range(0,num, 3):
+            self.palette.append((nums[c],nums[c+1],nums[c+2]))
+        self.palette += [(255,255,255)]*(256-len(self.palette))
+            
+    def tRNS(self, data):
+        if self.ctype != 3:
+            return
+        for i in range(len(data)):
+            c = struct.unpack("B", data[i:i+1])[0]
+            self.apalette.append((c,c,c))
+        self.apalette += [(255,255,255)]*(256 - len(self.apalette))
