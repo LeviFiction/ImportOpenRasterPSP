@@ -1,10 +1,10 @@
 from turtle import st
-from PSPApp import *
+from PSPApp import * # type:ignore
 from zipfile import ZipFile
 from xml.dom import minidom
 from os import path, remove
-from Tkinter import Tk
-import tkFileDialog
+from Tkinter import Tk # type:ignore
+import tkFileDialog # type:ignore
 import struct
 
 #------------------------------------------------------------------
@@ -40,7 +40,6 @@ def ScriptProperties():
 
 def Do(Environment):
     '''Main function of the script'''
-
     # Grab Filename
     root = Tk()
     root.withdraw()
@@ -110,7 +109,7 @@ def Do(Environment):
             #         # a group.
             #         stack_group(Environment, child, group=True)
 
-def new_file(Env, width, height, res=72):
+def new_file(Env, width, height, res=72.0):
     '''Creates a new file the size of the image we're importing'''
     if type(res) not in [int, float]:
         res = float(res)
@@ -266,7 +265,7 @@ def stack_group(Env, stack, doc, group=False):
             # we don't support the svg option
             if path.splitext(src)[1] != '.png':
                 continue
-            zip_file.extract(src, temp_dir)
+            zip_file.extract(src, temp_dir) # type:ignore
             temp_filename = path.join(temp_dir, src)
             attributes = get_all_attributes(child,attribute_keys)
             open_png_as_layer(Env, temp_filename, doc=doc, **attributes)
@@ -289,11 +288,11 @@ def stack_group(Env, stack, doc, group=False):
         selectLayer(Env, path=selectedLayer)
 
 def getLayerPath(env, doc=None):
-    return App.Do(env, 'ReturnLayerProperties', {}, doc)['Path']
+    return App.Do(env, 'ReturnLayerProperties', {}, doc)['Path'] # type:ignore
 
 def getLayerRect(env, doc=None):
     print(App.Do(env, 'ReturnLayerProperties', {},doc))
-    return App.Do(env, 'ReturnLayerProperties', {},doc)['LayerRect']
+    return App.Do(env, 'ReturnLayerProperties', {},doc)['LayerRect'] # type:ignore
 
 def PasteAsNewLayer(env, doc=None):
     # PasteAsNewLayer
