@@ -17,7 +17,7 @@ Also, because we're using a series of pre-built steps in PSP this is much slower
 2 - When using "Open As Layer" it always creates the layer at the top of the layer's palette.  If I'm using groups I need a good way to determine how to put it into the appropriate group afterward.
 
 ## Current Plans
-I've just added the pypng module, only the png.py version of it, and plan to remove the majority of the code, keeping only the bits required by the asDirect() method.  This will let me return the first visible pixel location of the PNG as quickly as possible.  Hopefully for most non-transparent without having to read more than the header of the image.  
+I can't think of any fast way to get the starting point of a PNG without going through all of the lines of the image.  And that's not very fast with PSP.  Though I suppose it's not horribly inconvenient either.  The fastest way is to open the PNG as a sepate image, get the image size, the starting point of the layer, and then copy and paste into the new image.  It's slow as well, so it'll be interesting to see which one is faster on a massive image with only a tiny visible piece.
 
 ## Library Requirements
 * zipfile
